@@ -1,0 +1,763 @@
+#!/usr/bin/perl -w
+
+# Copyright 2012 Thomas H. Schmidt
+#
+# This file is part of squaredance.
+#
+# squaredance is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# any later version.
+#
+# squaredance is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with squaredance; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+
+### Load Packages & Modules ####################################################
+use strict;
+#use Cwd;
+#use Fcntl;
+use IO::Handle;
+use Math::Trig;
+use FindBin qw($RealBin); # Absolute path to THIS script.
+use lib $RealBin . "/modules";
+autoflush STDOUT 1; # For direct output (IO:Handle).
+
+use cmdline;
+use FileIO::gro;
+use FileIO::ndx;
+use protein;
+use vector;
+################################################################################
+
+
+
+### Default Parameters #########################################################
+our $verbose      = 0;                  # Be loud and noisy (and global).
+
+my $groInFile     = 'protein.gro';      # Input coordinates file.
+my $ndxInFile     = '';                 # Input NDX file.
+#my $membInFile    = 'membrane.gro';     # Membrane coordinates file.
+#my $membNdxInFile = '';                 # Membrane NDX file.
+#my $groOutFile    = 'prot_memb.gro';    # Output GRO file.
+#my $cgProtGroFile = '';                 # Output GRO file of the coarse-grained protein.
+my $gridOutFile   = '';                 # Output GRO file of the grid.
+#my $orient        = 1;                  # Orient the protein.
+#my $hsprofOutFile = '';                 # Output file of the hydrophilicity-surface score (profile).
+my $cavityExcl    = 1;                  # Exclude charged surface residue detection for protein internal volumes.
+my $gridDeltaX    = 0.05;                # Grid spacing in the x direction / nm.
+my $gridDeltaY    = 0.05;                # Grid spacing in the y direction / nm.
+my $gridDeltaZ    = 0.05;                # Grid spacing in the z direction / nm.
+my $aaRegex       = "(ALA|ARG|ASN|ASP|CYS|GLU|GLN|GLY|HIS|ILE|LEU|LYS|MET|PHE|PRO|SER|THR|TRP|TYR|VAL)";
+#my $lipidResname = '^POP[ACEG]?$';      # Regex for the automatic detection of lipid molecules in the membrane GRO file.
+#my $nMembranes    = 1;
+#my $withPlanes    = 0;                  # Add the planes for highlighting the borders of the hydrophobic range.
+#my $thicknHphobic = 2.4;                # The width of the hydrophobic belt.
+#my $membThickness = 4.86;               # ...if it could not be measured.
+#my $isTMProt      = 1;
+my $helpAndQuit   = 0;                  # Print out program help.
+#my @rotAngs       = (0, 90, 0, 90);
+################################################################################
+
+
+
+### Internal parameters ########################################################
+my $year          = 2012;
+my $version       = 'beta1';
+
+my %groData;          # Filled by "GROFiles::readGro(<GROFILE>)".
+my @ndxData;      # Filled by "NDXFiles::readNdx(<NDXFILE>)".
+
+### CHECKED (above)
+###################
+
+#my @membHeadGroupIds; # Filled by "NDXFiles::selectGroupIds(...)".
+
+
+#my $membZCenter = 0;
+#my $thicknHphobicUp  = $thicknHphobic/2;
+#my $thicknHphobicLow = $thicknHphobic/2;
+
+
+#my $hphobicGridRange;
+
+#my $contProtRef;
+#my $sliceScoreRef;
+#my $beltZCenter;
+#my $orderedRangesRef;
+#my $beltHashRef;
+
+my %cgProtData;
+my %cggroData;
+
+my @tmpArray;
+################################################################################
+
+
+
+### Print out program headlines ################################################
+printHead();
+################################################################################
+
+
+
+### Handle commandline parameters ##############################################
+Cmdline::addCmdlParam('scalar', 'f', 'Input', \$groInFile, $groInFile, 'Structure file: gro');
+Cmdline::addCmdlParam('scalar', 'n', 'Input, Opt.', \$ndxInFile, 'protein.ndx', 'Index file');
+#Cmdline::addCmdlParam('scalar', 'f2', 'Input', \$membInFile, $membInFile, 'Structure file: gro');
+#Cmdline::addCmdlParam('scalar', 'n2', 'Input, Opt.', \$membNdxInFile, 'membrane.ndx', 'Index file');
+#Cmdline::addCmdlParam('scalar', 'o', 'Output', \$groOutFile, $groOutFile, 'Structure file: gro');
+#Cmdline::addCmdlParam('scalar', 'cg', 'Output, Opt.', \$cgProtGroFile, $cgProtGroFile, 'Structure file: gro');
+Cmdline::addCmdlParam('scalar', 'grd', 'Output, Opt.', \$gridOutFile, $gridOutFile, 'Structure file: gro');
+#Cmdline::addCmdlParam('array', 't', 'Input, Mult.', \@multiArray, 'traj.gro', 'Trajectory: gro'); # NOTE: Just an example.
+#Cmdline::addCmdlParam('scalar', 'hs', 'Output, Opt.', \$hsprofOutFile, $hsprofOutFile, 'Generic data file');
+Cmdline::addCmdlParam('flag', 'h', 'bool', \$helpAndQuit, $helpAndQuit ? 'yes' : 'no', 'Print help info and quit');
+Cmdline::addCmdlParam('scalar', 'gz', 'real', \$gridDeltaZ, $gridDeltaZ, 'Grid spacing along the Z axis');
+#Cmdline::addCmdlParam('flag', 'orient', 'bool', \$orient, $orient ? 'yes' : 'no', 'Orient the protein');
+#Cmdline::addCmdlParam('scalar', 'nmemb', 'int', \$nMembranes, $nMembranes, 'Number of hydrophobic belts for detection');
+#Cmdline::addCmdlParam('flag', 'planes', 'bool', \$withPlanes, $withPlanes ? 'yes' : 'no', 'Add dummy atoms representing the membrane plane');
+#Cmdline::addCmdlParam('flag', 'tm', 'bool', \$isTMProt, $isTMProt, 'The protein is a transmembrane protein');
+Cmdline::addCmdlParam('flag', 'v', 'bool', \$verbose, $verbose ? 'yes' : 'no', 'Be loud and noisy');
+#Cmdline::addCmdlParam('scalar', 'bw', 'real', \$thicknHphobic, $thicknHphobic, 'Hydrophobic belt width (nm) (obsolete if a membrane NDX file is given)');
+#Cmdline::addCmdlParam('scalar', 'lr', 'string', \$lipidResname, $lipidResname, 'Regex for the detection of the bilayer atoms of the membrane GRO file (obsolete if a membrane NDX file is given)');
+
+Cmdline::parser();
+################################################################################
+
+
+
+### Print program help if the user set the flag ################################
+printHelp(Cmdline::getCmdlParamRef(), 1) if $helpAndQuit;
+################################################################################
+
+
+
+### Read the GRO file ##########################################################
+%groData = GRO::readGro($groInFile); # Read membrane input GRO file.
+################################################################################
+
+my @atomIds;
+
+### Get corresponding NDX data #################################################
+if ($ndxInFile) {
+    @ndxData = NDX::readNdx($ndxInFile); # Read input NDX file.
+    NDX::printNdxGroups(@ndxData);
+    my @groupIds = selectGroupIds(\@ndxData, 'cross-sectional area calculation');
+    @atomIds = @{$ndxData[$groupIds[0]]{'atoms'}};
+}
+else {
+    print "No NDX file defined. Will use amino acids to determine residues for calculation.\n";
+
+    for (my $i=1; $i<@{$groData{'atoms'}}; $i++) {
+        push(@atomIds, $i) if $groData{'atoms'}[$i]{'resName'} =~ /$aaRegex/;
+    }
+}
+################################################################################
+
+
+
+### Detect the bilayer thickness ###############################################
+#$membZCenter = getMembZCenter($groData{'atoms'}, \@membNdxData);
+
+#my @tmpArray = getBilayerThickness($groData{'atoms'}, $membNdxData[$membHeadGroupIds[0]]{'atoms'});
+#$membThickness  = $tmpArray[0];
+#my $membZCenter = $tmpArray[1];
+################################################################################
+
+
+
+
+### Define grid parameters #####################################################
+Protein::setGridDelta($gridDeltaX, $gridDeltaY, $gridDeltaZ); # Set the grid spacing in x, y & z.
+################################################################################
+
+
+### Build grid #########################################################
+Protein::atoms2Grid(\@atomIds, $groData{'atoms'}, $groData{'box'});
+#$gridRef 
+#@tmpArray = Protein::analyze(\@atomIds,
+#                             $groData{'atoms'});
+#$gridRef  = $tmpArray[2];
+
+Protein::grid2GroFile('final.grid.gro') if $gridOutFile; # Print grid-coordinates.
+################################################################################
+
+my $nSliceVoxel;
+
+### Calculate the area occupied by atoms within that slice #####################
+$nSliceVoxel = countSliceOccupancy(Protein::getGridRef());
+printf("Area = %0.3f nm²\n", $nSliceVoxel*$gridDeltaX*$gridDeltaY);
+printf("Percent of the XY plane (A = %0.3f nm²) = %0.3f%%\n", $groData{'box'}{'cooX'}*$groData{'box'}{'cooY'}, ($nSliceVoxel*$gridDeltaX*$gridDeltaY*100)/($groData{'box'}{'cooX'}*$groData{'box'}{'cooY'}));
+################################################################################
+
+
+
+### Determine the hydophobic belt ##############################################
+#my %belt = detectBelts($sliceScoreRef, $gridDeltaZ, $thicknHphobicUp, $thicknHphobicLow, $thicknHphobic, $isTMProt);
+################################################################################
+
+#$sliceScoreRef = getSliceScore($gridRef, $gridDeltaZ, $contProtRef, $hsprofOutFile);
+
+#$beltZCenter = $belt{'hphobCent'} * $gridDeltaZ if $belt{'hphobCent'};
+
+
+
+#my @protAtomIds = getAtomIds($protData{'atoms'});
+#my @membAtomIds = getAtomIds($groData{'atoms'});
+
+
+
+#### Translate all protein atoms to the center of the membrane box #############
+#centerGroup(\@protAtomIds, $protData{'atoms'}, $groData{'box'});
+################################################################################
+
+
+
+### For validation only: build a couple of dummy atoms #########################
+#buildDummyPlane($protData{'atoms'}, \@protAtomIds, $beltZCenter, $thicknHphobicUp, $thicknHphobicLow) if $withPlanes;
+################################################################################
+
+
+
+#unless (defined $beltZCenter) {
+#    print "Sorry, don't found a hydrophobic belt...\n";
+#    exit;
+#}
+
+
+### Translate all bilayer atoms to the center (z-axis) of the hydrophob. belt. #
+#my $zTranslVec = $beltZCenter - $membZCenter;
+#zTranslateGroup(\@membAtomIds, $groData{'atoms'}, $zTranslVec);
+################################################################################
+
+
+
+### Combine system components and write out the coordinates ####################
+#my %combData = combGroData(\%protData, \%groData);
+#GRO::writeGro($groOutFile, \%combData);
+exit;
+################################################################################
+
+
+
+################################################################################
+### Subroutines ################################################################
+################################################################################
+sub printHead {
+    print <<EndOfHead;
+################################################################################
+
+                               squaredance $version
+                   Slicewise grid-based analysis of molecules
+              Copyright Thomas H. Schmidt & Christian Kandt, $year
+
+                     http://code.google.com/p/squaredance
+
+                  squaredance comes with ABSOLUTELY NO WARRANTY.
+          This is free software, and you are welcome to redistribute it
+            under certain conditions; type `--copyright' for details.
+
+################################################################################
+
+EndOfHead
+}
+
+
+
+sub printFoot {
+    print <<EndOfFoot;
+Please cite:
+  [1] Schmidt T. H., Kandt C. (2012): LAMBADA & InflateGRO2: Efficient Membrane
+      Alignment and Insertion of Membrane Proteins for Molecular Dynamics Simulations.
+      Biophysical Journal 102, 173a. http://dx.doi.org/10.1016/j.bpj.2011.11.938
+
+EndOfFoot
+}
+
+
+
+sub printHelp {
+    my $cmdLParamRef   = shift;
+    my $quitAfterPrint = shift;
+
+
+    print <<EndOfHelp;
+DESCRIPTION
+-----------
+squaredance reads a coordinate file of a membrane protein and a lipid bilayer,
+orients the protein according to its hydrophobic belt planes parallel to the
+XY plane of the simulation box, aligns the membrane then and puts out the combined
+system ready for protein insertion (e.g. using InflateGRO2).
+
+USAGE: squaredance -f GROFILE -n NDXFILE
+
+EndOfHelp
+
+    Cmdline::printParamHelp($cmdLParamRef);
+
+    printFoot();
+
+    exit if $quitAfterPrint;
+}
+
+
+
+sub printCopyright {
+    print <<"EndOfCopyright";
+squaredance is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+any later version.
+
+squaredance is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with squaredance; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+EndOfCopyright
+    exit;
+}
+
+
+
+sub getAtomIdsByResname {
+    my $atomDataRef  = shift;
+    my $resnameRegex = shift;
+
+    my @atomIds;
+
+    for (my $i=1; $i<@{$atomDataRef}; $i++) {
+        push(@atomIds, $i) if $$atomDataRef[$i]{'resName'} =~ /$resnameRegex/;
+    }
+    return @atomIds;
+}
+
+
+
+sub getMembZCenter {
+    my $atomDataRef = shift;
+    my $atomIdsRef  = shift;
+
+    my $membZCenter = 0;
+
+    foreach (@{$atomIdsRef}) {
+        $membZCenter += $$atomDataRef[$_]{'cooZ'};
+    }
+    return $membZCenter /= @{$atomIdsRef};
+}
+
+
+
+#sub buildDummyPlane {
+#    my $atomDataRef = shift;
+#    my $atomIdsRef  = shift;
+#    my $beltZCenter = shift;
+#
+#    my $residue     = $$atomDataRef[-1]{'residue'};
+#    my $serial      = $$atomDataRef[-1]{'serial'};
+#    my $radius      = 4;
+#    my $radius2     = $radius*$radius;
+#    my $gridSpacing = 0.1;
+#
+#    ### Detect the geometrical center and place a bead #########################
+#    my %geoCenter = getGeoCenter($atomIdsRef, $atomDataRef);
+#    my %dummyCoords = ('cooX' => $geoCenter{'cooX'},
+#                       'cooY' => $geoCenter{'cooY'},
+#                       'cooZ' => $beltZCenter);
+#    push(@{$atomDataRef}, setCgAtom(++$residue, 'DUM', 'CEN', ++$serial, \%dummyCoords));
+#    ############################################################################
+#
+#
+#    ### Build the plane around the geometrical center ##########################
+#    for (my $x=$geoCenter{'cooX'}-$radius; $x<=$geoCenter{'cooX'}+$radius; $x+=$gridSpacing) {
+#        for (my $y=$geoCenter{'cooY'}-$radius; $y<=$geoCenter{'cooY'}+$radius; $y+=$gridSpacing) {
+#            my $dx = $geoCenter{'cooX'} - $x;
+#            my $dy = $geoCenter{'cooY'} - $y;
+#            next if ($dx*$dx + $dy*$dy) > $radius2;
+#            my %dummyCoords = ('cooX' => $x,
+#                               'cooY' => $y,
+#                               'cooZ' => $beltZCenter);
+#            push(@{$atomDataRef}, setCgAtom(++$residue, 'DUM', 'DUM', ++$serial, \%dummyCoords));
+#        }
+#    }
+#    ############################################################################
+#
+#
+#    ### Build the plane limiting the hydrophobic range upwards #################
+#    for (my $x=$geoCenter{'cooX'}-$radius; $x<=$geoCenter{'cooX'}+$radius; $x+=$gridSpacing) {
+#        for (my $y=$geoCenter{'cooY'}-$radius; $y<=$geoCenter{'cooY'}+$radius; $y+=$gridSpacing) {
+#            my $dx = $geoCenter{'cooX'} - $x;
+#            my $dy = $geoCenter{'cooY'} - $y;
+#            next if ($dx*$dx + $dy*$dy) > $radius2;
+#            my %dummyCoords = ('cooX' => $x,
+#                               'cooY' => $y,
+#                               'cooZ' => $beltZCenter+$thicknHphobicUp);
+#            push(@{$atomDataRef}, setCgAtom(++$residue, 'DUM', 'UPP', ++$serial, \%dummyCoords));
+#        }
+#    }
+#    ############################################################################
+#
+#
+#    ### Build the plane limiting the hydrophobic range downwards ###############
+#    for (my $x=$geoCenter{'cooX'}-$radius; $x<=$geoCenter{'cooX'}+$radius; $x+=$gridSpacing) {
+#        for (my $y=$geoCenter{'cooY'}-$radius; $y<=$geoCenter{'cooY'}+$radius; $y+=$gridSpacing) {
+#            my $dx = $geoCenter{'cooX'} - $x;
+#            my $dy = $geoCenter{'cooY'} - $y;
+#            next if ($dx*$dx + $dy*$dy) > $radius2;
+#            my %dummyCoords = ('cooX' => $x,
+#                               'cooY' => $y,
+#                               'cooZ' => $beltZCenter-$thicknHphobicLow);
+#            push(@{$atomDataRef}, setCgAtom(++$residue, 'DUM', 'LOW', ++$serial, \%dummyCoords));
+#        }
+#    }
+#    ############################################################################
+#}
+
+
+################################################################################
+### Subroutines ################################################################
+################################################################################
+sub getAtomIds {
+    my $coordsRef = shift;
+    my @atomIds;
+    for (my $i=0; $i<@{$coordsRef}; $i++) {
+        push(@atomIds, $i) if $$coordsRef[$i]{'resId'};
+    }
+    return @atomIds;
+}
+
+
+
+sub centerGroup {
+    my $atomIdsRef = shift;
+    my $coordsRef  = shift;
+    my $boxRef     = shift;
+
+    my %groupGeoCenter = getGeoCenter($atomIdsRef, $coordsRef);
+    my %translVector = ('cooX' => ($$boxRef{'cooX'}*0.5-$groupGeoCenter{'cooX'}),
+                        'cooY' => ($$boxRef{'cooY'}*0.5-$groupGeoCenter{'cooY'}));
+    foreach (@{$atomIdsRef}) {
+        $$coordsRef[$_]{'cooX'} += $translVector{'cooX'};
+        $$coordsRef[$_]{'cooY'} += $translVector{'cooY'};
+    }
+}
+
+
+
+sub zTranslateGroup {
+    my $atomIdsRef = shift;
+    my $coordsRef  = shift;
+    my $zTranslVec = shift;
+
+    foreach (@{$atomIdsRef}) {
+        $$coordsRef[$_]{'cooZ'} += $zTranslVec;
+    }
+}
+
+
+
+sub translateGroup {
+    my $atomIdsRef = shift;
+    my $coordsRef  = shift;
+    my $xTranslVec = shift;
+    my $yTranslVec = shift;
+    my $zTranslVec = shift;
+
+    foreach (@{$atomIdsRef}) {
+        $$coordsRef[$_]{'cooX'} += $xTranslVec;
+        $$coordsRef[$_]{'cooY'} += $yTranslVec;
+        $$coordsRef[$_]{'cooZ'} += $zTranslVec;
+    }
+}
+
+
+
+sub combGroData {
+    my $protGroDataRef = shift;
+    my $membGroDataRef = shift;
+    my %combGroData;
+
+    foreach (@{$$protGroDataRef{'atoms'}}) {
+        next unless $$_{'resId'};
+        push(@{$combGroData{'atoms'}}, $_);
+    }
+
+    foreach (@{$$membGroDataRef{'atoms'}}) {
+        next unless $$_{'resId'};
+        push(@{$combGroData{'atoms'}}, $_);
+    }
+
+    $combGroData{'title'}       = $$protGroDataRef{'title'} . ' + ' . $$membGroDataRef{'title'};
+    $combGroData{'nAtoms'}      = @{$combGroData{'atoms'}};
+    $combGroData{'box'}{'cooX'} = $$membGroDataRef{'box'}{'cooX'};
+    $combGroData{'box'}{'cooY'} = $$membGroDataRef{'box'}{'cooY'};
+    $combGroData{'box'}{'cooZ'} = $$protGroDataRef{'box'}{'cooZ'} > $$membGroDataRef{'box'}{'cooZ'} ? $$protGroDataRef{'box'}{'cooZ'} : $$membGroDataRef{'box'}{'cooZ'};
+
+    return %combGroData;
+}
+
+
+
+sub getBilayerThickness {
+    my $coordsRef     = shift;
+    my $headGroupsRef = shift;
+    my @resAtoms;
+    my @geoCenterHeads;
+    my @lowerLeafletResIds;
+    my @upperLeafletResIds;
+    my %upperLeaflGeoCenter;
+    my %lowerLeaflGeoCenter;
+    my $bilayerThickness;
+
+    print "  ---------------------------------\n  Detect bilayer thickness...\r";
+
+    my %bilayerGeoCenter = getGeoCenter($headGroupsRef, $coordsRef);
+#    printf("\nx %f and y %f and z %f\n", $bilayerGeoCenter{'cooX'}*10, $bilayerGeoCenter{'cooY'}*10, $bilayerGeoCenter{'cooZ'}*10);
+
+    ### Group head group atoms per residue #####################################
+    for (my $i=0; $i<@{$headGroupsRef}; $i++) {
+        my $atomId = $$headGroupsRef[$i];
+        next unless $$coordsRef[$atomId]{'resId'};
+        push(@{$resAtoms[$$coordsRef[$atomId]{'resId'}]}, $atomId);
+    }
+    ############################################################################
+
+
+#    ### Get the amphiphilic dimensions #########################################
+#    for (my $resId=0; $resId<@resAtoms; $resId++) {
+#        next unless $resAtoms[$resId];
+#        %{$geoCenterHeads[$resId]} = getGeoCenter($resAtoms[$resId], $coordsRef);
+#        $geoCenterHeads[$resId]{'cooZ'} < $bilayerGeoCenter{'cooZ'} ?
+#            push(@lowerLeafletResIds, $resId) :
+#            push(@upperLeafletResIds, $resId);
+#    }
+#    printf("\n    nLipids upper leaflet: %4d", scalar(@upperLeafletResIds)) if $main::verbose;
+#    printf("\n    nLipids lower leaflet: %4d", scalar(@lowerLeafletResIds)) if $main::verbose;
+#    ############################################################################
+    exit;
+
+
+    ### Get the geometrical center of each headgroup per leaflet ###############
+    for (my $resId=0; $resId<@resAtoms; $resId++) {
+        next unless $resAtoms[$resId];
+        %{$geoCenterHeads[$resId]} = getGeoCenter($resAtoms[$resId], $coordsRef);
+        $geoCenterHeads[$resId]{'cooZ'} < $bilayerGeoCenter{'cooZ'} ?
+            push(@lowerLeafletResIds, $resId) :
+            push(@upperLeafletResIds, $resId);
+    }
+    printf("\n    nLipids upper leaflet: %4d", scalar(@upperLeafletResIds)) if $main::verbose;
+    printf("\n    nLipids lower leaflet: %4d", scalar(@lowerLeafletResIds)) if $main::verbose;
+    ############################################################################
+
+
+    ### Get the geometrical center of all leaflet-headgroups ###################
+    %upperLeaflGeoCenter = getGeoCenter(\@upperLeafletResIds, \@geoCenterHeads);
+    %lowerLeaflGeoCenter = getGeoCenter(\@lowerLeafletResIds, \@geoCenterHeads);
+    $bilayerThickness    = $upperLeaflGeoCenter{'cooZ'} - $lowerLeaflGeoCenter{'cooZ'};
+#    printf("Upper :: x %f and y %f and z %f\n", $upperLeaflGeoCenter{'cooX'}*10, $upperLeaflGeoCenter{'cooY'}*10, $upperLeaflGeoCenter{'cooZ'}*10);
+#    printf("Lower :: x %f and y %f and z %f\n", $lowerLeaflGeoCenter{'cooX'}*10, $lowerLeaflGeoCenter{'cooY'}*10, $lowerLeaflGeoCenter{'cooZ'}*10);
+    printf("\n    Averaged bilayer thickness: %f\n", $bilayerThickness) if $main::verbose;
+    ############################################################################
+
+    print "  Detect bilayer thickness: Finished\n  ---------------------------------\n\n";
+
+#    return(4, $bilayerGeoCenter{'cooZ'});
+#    return($bilayerThickness, $bilayerGeoCenter{'cooZ'});
+}
+
+
+
+sub selectGroupIds {
+    my $ndxDataRef    = shift;
+    my $groupNameText = shift;
+    my $nGroups       = shift;
+    my @selectGroupIds;
+
+    $nGroups = 10000 unless $nGroups; # Set the limit of selectable groups to 10000.
+
+    print "\n  Select a group for $groupNameText: > ";
+
+    chomp(my $groupId = <STDIN>);
+    while (!scalar(@selectGroupIds) || $groupId ne 'q') {
+        if ($groupId =~ /^\s*(\d+)?\s*$/ && $$ndxDataRef[$1]{'groupName'}) {
+            push(@selectGroupIds, $1);
+            print "    Added group $1.\n";
+            return @selectGroupIds if scalar(@selectGroupIds) == $nGroups;
+            print "  Do you want to select another group? (\'q\' for quit) > ";
+        }
+        else {
+            print "    Invalid group...\n  Please try to select a group for $groupNameText again (\'q\' for quit): > ";
+        }
+        chomp($groupId = <STDIN>);
+    }
+    return @selectGroupIds;
+}
+
+
+
+sub countSliceOccupancy {
+    my $gridRef     = shift;
+    my $zSliceStart = shift;
+    my $zSliceEnd   = shift;
+    my $nSliceVoxel = 0;
+    my @grid2D;
+
+    $zSliceStart = 0 unless $zSliceStart;
+    $zSliceEnd = @{$gridRef} unless $zSliceEnd;
+
+
+    for (my $z=$zSliceStart; $z<=$zSliceEnd; $z++) {
+        printf("Counting voxels: % 3d%%\r", $z*100/$zSliceEnd) if $main::verbose;
+        next unless $$gridRef[$z];
+        for (my $x=0; $x<@{$$gridRef[$z]}; $x++) {
+            next unless $$gridRef[$z][$x];
+            for (my $y=0; $y<@{$$gridRef[$z][$x]}; $y++) {
+                next unless $$gridRef[$z][$x][$y];
+                $nSliceVoxel++ if defined $$gridRef[$z][$x][$y]{'type'} && !$grid2D[$x][$y];
+                $grid2D[$x][$y] = 1;
+            }
+        }
+    }
+    print "\n" if $main::verbose;
+
+    return $nSliceVoxel;
+}
+
+
+
+sub countSliceVoxel {
+    my $gridRef     = shift;
+    my $zSliceStart = shift;
+    my $zSliceEnd   = shift;
+    my $nSliceVoxel = 0;
+
+    $zSliceStart = 0 unless $zSliceStart;
+    $zSliceEnd = @{$gridRef} unless $zSliceEnd;
+
+    for (my $z=$zSliceStart; $z<=$zSliceEnd; $z++) {
+        printf("Counting voxels: % 3d%%\r", $z*100/$zSliceEnd) if $main::verbose;
+        next unless $$gridRef[$z];
+        for (my $x=0; $x<@{$$gridRef[$z]}; $x++) {
+            next unless $$gridRef[$z][$x];
+            for (my $y=0; $y<@{$$gridRef[$z][$x]}; $y++) {
+                next unless $$gridRef[$z][$x][$y];
+                $nSliceVoxel++ if defined $$gridRef[$z][$x][$y]{'type'};
+            }
+        }
+    }
+    print "\n" if $main::verbose;
+
+    return $nSliceVoxel;
+}
+
+
+
+sub getSliceAreaOld {
+    my $gridRef       = shift;
+    my $gridDeltaZ    = shift;
+#    my $hsprofOutFile = shift;
+
+    my @sliceScore;
+    
+    ### Count z-distribution ###################################################
+    my $finalZCoord = 0;
+    for (my $z=0; $z<@$gridRef; $z++) {
+        $finalZCoord = $z;
+        next unless $$gridRef[$z];
+#        $sliceScore[$z] = 0;
+        my $nVoxel = 0;
+        for (my $x=0; $x<@{$$gridRef[$z]}; $x++) {
+            next unless $$gridRef[$z][$x];
+            for (my $y=0; $y<@{$$gridRef[$z][$x]}; $y++) {
+                next unless $$gridRef[$z][$x][$y];
+                if ($$gridRef[$z][$x][$y]{'type'} eq 'SUR') {
+                    $sliceScore[$z] += $$gridRef[$z][$x][$y]{'sum'};
+                    $nVoxel++;
+                }
+            }
+        }
+        next unless $nVoxel;
+        $sliceScore[$z] /= $nVoxel; # Score depends on the number of surface voxels taken into account.
+#        printf("%d %6.3f\n", $z, $sliceScore[$z]);
+    }
+    ############################################################################
+
+
+    ### Print out the z-distribution (hydrophilicity profile) ##################
+#    hsprof2File(\@sliceScore, $gridDeltaZ, $finalZCoord, $hsprofOutFile) if $hsprofOutFile;
+    ############################################################################
+
+    return \@sliceScore;
+}
+
+
+
+sub hsprof2File {
+    my $sliceScoreRef = shift;
+    my $gridDeltaZ    = shift;
+#    my $contProtRef    = shift;
+    my $finalZCoord   = shift;
+    my $hsprofOutFile = shift;
+
+    open(HSPROF, ">$hsprofOutFile") || die "ERROR: Cannot open hydrophilicity score output file \"$hsprofOutFile\": $!\n";
+    for (my $z=$finalZCoord; $z>=0; $z--) {
+        printf HSPROF ("%.3f", $z*$gridDeltaZ);
+        if (defined $$sliceScoreRef[$z]) {
+            my $tmpZCounter = $$sliceScoreRef[$z];
+            printf HSPROF (" %f", $tmpZCounter);
+        }
+        print HSPROF "\n";
+    }
+    close(HSPROF);
+}
+
+
+
+sub round {
+    my ( $num, $prec ) = @_;
+    return int( $num / $prec + 0.5 - ( $num < 0 ) ) * $prec;
+}
+
+
+
+
+sub getGeoCenter {
+    my $atomIdsRef = shift;
+    my $coordsRef  = shift;
+    my %geoCenter  = ('cooX' => 0,
+                      'cooY' => 0,
+                      'cooZ' => 0);
+
+    foreach (@{$atomIdsRef}) {
+        $geoCenter{'cooX'} += $$coordsRef[$_]{'cooX'};
+        $geoCenter{'cooY'} += $$coordsRef[$_]{'cooY'};
+        $geoCenter{'cooZ'} += $$coordsRef[$_]{'cooZ'};
+    }
+    $geoCenter{'cooX'} /= scalar(@{$atomIdsRef});
+    $geoCenter{'cooY'} /= scalar(@{$atomIdsRef});
+    $geoCenter{'cooZ'} /= scalar(@{$atomIdsRef});
+    return %geoCenter;
+}
+
+
+
+sub renumAtoms {
+    my @renumAtoms;
+    my $atomId = 0;
+    foreach (@{$_[0]}) {
+        next unless $$_{'resId'};
+        $renumAtoms[++$atomId] = $_;
+    }
+    return \@renumAtoms;
+}
+############################################################
