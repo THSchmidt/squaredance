@@ -32,6 +32,8 @@ autoflush STDOUT 1; # For direct output (IO:Handle).
 use cmdline;
 use FileIO::gro;
 use FileIO::ndx;
+use Grid2D;
+use Grid3D;
 use protein;
 use vector;
 ################################################################################
@@ -43,10 +45,7 @@ our $verbose      = 0;                  # Be loud and noisy (and global).
 
 my $groInFile     = 'protein.gro';      # Input coordinates file.
 my $ndxInFile     = '';                 # Input NDX file.
-#my $membInFile    = 'membrane.gro';     # Membrane coordinates file.
-#my $membNdxInFile = '';                 # Membrane NDX file.
 #my $groOutFile    = 'prot_memb.gro';    # Output GRO file.
-#my $cgProtGroFile = '';                 # Output GRO file of the coarse-grained protein.
 my $gridOutFile   = '';                 # Output GRO file of the grid.
 #my $orient        = 1;                  # Orient the protein.
 #my $hsprofOutFile = '';                 # Output file of the hydrophilicity-surface score (profile).
@@ -60,7 +59,7 @@ my $aaRegex       = "(ALA|ARG|ASN|ASP|CYS|GLU|GLN|GLY|HIS|ILE|LEU|LYS|MET|PHE|PR
 #my $withPlanes    = 0;                  # Add the planes for highlighting the borders of the hydrophobic range.
 #my $thicknHphobic = 2.4;                # The width of the hydrophobic belt.
 #my $membThickness = 4.86;               # ...if it could not be measured.
-#my $isTMProt      = 1;
+my $range2Slice   = 0;                  # Map all atoms to one slice.
 my $helpAndQuit   = 0;                  # Print out program help.
 #my @rotAngs       = (0, 90, 0, 90);
 ################################################################################
@@ -68,11 +67,12 @@ my $helpAndQuit   = 0;                  # Print out program help.
 
 
 ### Internal parameters ########################################################
-my $year          = 2012;
-my $version       = 'beta1';
+my $year    = 2012;
+my $version = 'beta1';
 
-my %groData;          # Filled by "GROFiles::readGro(<GROFILE>)".
+my %groData;      # Filled by "GROFiles::readGro(<GROFILE>)".
 my @ndxData;      # Filled by "NDXFiles::readNdx(<NDXFILE>)".
+my @atomIds;
 
 ### CHECKED (above)
 ###################
@@ -93,10 +93,10 @@ my @ndxData;      # Filled by "NDXFiles::readNdx(<NDXFILE>)".
 #my $orderedRangesRef;
 #my $beltHashRef;
 
-my %cgProtData;
-my %cggroData;
+#my %cgProtData;
+#my %cggroData;
 
-my @tmpArray;
+#my @tmpArray;
 ################################################################################
 
 
@@ -108,24 +108,18 @@ printHead();
 
 
 ### Handle commandline parameters ##############################################
-Cmdline::addCmdlParam('scalar', 'f', 'Input', \$groInFile, $groInFile, 'Structure file: gro');
-Cmdline::addCmdlParam('scalar', 'n', 'Input, Opt.', \$ndxInFile, 'protein.ndx', 'Index file');
-#Cmdline::addCmdlParam('scalar', 'f2', 'Input', \$membInFile, $membInFile, 'Structure file: gro');
-#Cmdline::addCmdlParam('scalar', 'n2', 'Input, Opt.', \$membNdxInFile, 'membrane.ndx', 'Index file');
+Cmdline::addCmdlParam('scalar', 'f',   'Input', \$groInFile, $groInFile, 'Structure file: gro');
+Cmdline::addCmdlParam('scalar', 'n',   'Input, Opt.', \$ndxInFile, 'protein.ndx', 'Index file');
 #Cmdline::addCmdlParam('scalar', 'o', 'Output', \$groOutFile, $groOutFile, 'Structure file: gro');
-#Cmdline::addCmdlParam('scalar', 'cg', 'Output, Opt.', \$cgProtGroFile, $cgProtGroFile, 'Structure file: gro');
-Cmdline::addCmdlParam('scalar', 'grd', 'Output, Opt.', \$gridOutFile, $gridOutFile, 'Structure file: gro');
-#Cmdline::addCmdlParam('array', 't', 'Input, Mult.', \@multiArray, 'traj.gro', 'Trajectory: gro'); # NOTE: Just an example.
-#Cmdline::addCmdlParam('scalar', 'hs', 'Output, Opt.', \$hsprofOutFile, $hsprofOutFile, 'Generic data file');
-Cmdline::addCmdlParam('flag', 'h', 'bool', \$helpAndQuit, $helpAndQuit ? 'yes' : 'no', 'Print help info and quit');
-Cmdline::addCmdlParam('scalar', 'gz', 'real', \$gridDeltaZ, $gridDeltaZ, 'Grid spacing along the Z axis');
-#Cmdline::addCmdlParam('flag', 'orient', 'bool', \$orient, $orient ? 'yes' : 'no', 'Orient the protein');
-#Cmdline::addCmdlParam('scalar', 'nmemb', 'int', \$nMembranes, $nMembranes, 'Number of hydrophobic belts for detection');
-#Cmdline::addCmdlParam('flag', 'planes', 'bool', \$withPlanes, $withPlanes ? 'yes' : 'no', 'Add dummy atoms representing the membrane plane');
-#Cmdline::addCmdlParam('flag', 'tm', 'bool', \$isTMProt, $isTMProt, 'The protein is a transmembrane protein');
-Cmdline::addCmdlParam('flag', 'v', 'bool', \$verbose, $verbose ? 'yes' : 'no', 'Be loud and noisy');
-#Cmdline::addCmdlParam('scalar', 'bw', 'real', \$thicknHphobic, $thicknHphobic, 'Hydrophobic belt width (nm) (obsolete if a membrane NDX file is given)');
-#Cmdline::addCmdlParam('scalar', 'lr', 'string', \$lipidResname, $lipidResname, 'Regex for the detection of the bilayer atoms of the membrane GRO file (obsolete if a membrane NDX file is given)');
+Cmdline::addCmdlParam('scalar', 'g',   'Output, Opt.', \$gridOutFile, $gridOutFile, 'Structure file: gro');
+#Cmdline::addCmdlParam('array',  't',   'Input, Mult.', \@multiArray, 'traj.gro', 'Trajectory: gro'); # NOTE: Just an example.
+#Cmdline::addCmdlParam('scalar', 'hs',  'Output, Opt.', \$hsprofOutFile, $hsprofOutFile, 'Generic data file');
+Cmdline::addCmdlParam('flag',   'h',   'bool', \$helpAndQuit, $helpAndQuit ? 'yes' : 'no', 'Print help info and quit');
+Cmdline::addCmdlParam('scalar', 'dx',  'real', \$gridDeltaX, $gridDeltaX, 'Grid spacing along the X axis');
+Cmdline::addCmdlParam('scalar', 'dy',  'real', \$gridDeltaY, $gridDeltaY, 'Grid spacing along the Y axis');
+Cmdline::addCmdlParam('scalar', 'dz',  'real', \$gridDeltaZ, $gridDeltaZ, 'Grid spacing along the Z axis');
+Cmdline::addCmdlParam('flag',   'r2s', 'bool', \$range2Slice, $range2Slice ? 'yes' : 'no', 'Map all defined atoms within a range to one slice.');
+Cmdline::addCmdlParam('flag',   'v',   'bool', \$verbose, $verbose ? 'yes' : 'no', 'Be loud and noisy');
 
 Cmdline::parser();
 ################################################################################
@@ -142,13 +136,13 @@ printHelp(Cmdline::getCmdlParamRef(), 1) if $helpAndQuit;
 %groData = GRO::readGro($groInFile); # Read membrane input GRO file.
 ################################################################################
 
-my @atomIds;
+
 
 ### Get corresponding NDX data #################################################
 if ($ndxInFile) {
     @ndxData = NDX::readNdx($ndxInFile); # Read input NDX file.
     NDX::printNdxGroups(@ndxData);
-    my @groupIds = selectGroupIds(\@ndxData, 'cross-sectional area calculation');
+    my @groupIds = selectGroupIds(\@ndxData, 'cross-sectional area calculation', 1);
     @atomIds = @{$ndxData[$groupIds[0]]{'atoms'}};
 }
 else {
@@ -162,36 +156,81 @@ else {
 
 
 
-### Detect the bilayer thickness ###############################################
-#$membZCenter = getMembZCenter($groData{'atoms'}, \@membNdxData);
-
-#my @tmpArray = getBilayerThickness($groData{'atoms'}, $membNdxData[$membHeadGroupIds[0]]{'atoms'});
-#$membThickness  = $tmpArray[0];
-#my $membZCenter = $tmpArray[1];
+### Map atoms within a range to one slice ######################################
+if ($range2Slice) {
+    Grid2D::setGridDelta($gridDeltaX, $gridDeltaY); # Set the grid spacing in x & y.
+    Grid2D::atoms2Grid(\@atomIds, $groData{'atoms'}, $groData{'box'});
+    Grid2D::grid2GroFile($gridOutFile) if $gridOutFile; # Print grid-coordinates.
+    my $nSliceVoxel = countSliceVoxel(Grid2D::getGridRef());
+    printf("Area = %0.3f nm²\n", $nSliceVoxel*$gridDeltaX*$gridDeltaY);
+    printf("Percent of the XY plane (A = %0.3f nm²) = %0.3f%%\n", $groData{'box'}{'cooX'}*$groData{'box'}{'cooY'}, ($nSliceVoxel*$gridDeltaX*$gridDeltaY*100)/($groData{'box'}{'cooX'}*$groData{'box'}{'cooY'}));
+    exit;
+}
 ################################################################################
 
 
 
+### Normal workflow: analyze slice by slice ####################################
+Grid3D::setGridDelta($gridDeltaX, $gridDeltaY, $gridDeltaZ); # Set the grid spacing in x, y & z.
+Grid3D::atoms2Grid(\@atomIds, $groData{'atoms'}, $groData{'box'});
+Grid3D::detectCavity();
+Grid3D::grid2GroFile($gridOutFile) if $gridOutFile; # Print grid-coordinates.
 
-### Define grid parameters #####################################################
-Protein::setGridDelta($gridDeltaX, $gridDeltaY, $gridDeltaZ); # Set the grid spacing in x, y & z.
+my $zProfileRef = getZProfile(Grid3D::getGridRef());
+
+
+my $xSecAreaOutFile = "xsecarea.dat";
+xSecArea2File($zProfileRef, $xSecAreaOutFile, $gridDeltaX, $gridDeltaY, $gridDeltaZ);
+
+exit;
 ################################################################################
 
+sub getZProfile {
+    my $gridRef    = shift;
+    my @profile;
 
-### Build grid #########################################################
-Protein::atoms2Grid(\@atomIds, $groData{'atoms'}, $groData{'box'});
-#$gridRef 
-#@tmpArray = Protein::analyze(\@atomIds,
-#                             $groData{'atoms'});
-#$gridRef  = $tmpArray[2];
+    for (my $z=0; $z<@$gridRef; $z++) {
+        next unless $$gridRef[$z];
+        $profile[$z] = 0;
+        for (my $x=0; $x<@{$$gridRef[$z]}; $x++) {
+            next unless $$gridRef[$z][$x];
+            for (my $y=0; $y<@{$$gridRef[$z][$x]}; $y++) {
+                next unless $$gridRef[$z][$x][$y];
+                $profile[$z]++;
+            }
+        }
+    }
 
-Protein::grid2GroFile('final.grid.gro') if $gridOutFile; # Print grid-coordinates.
-################################################################################
+    return \@profile;
+}
 
+
+
+sub xSecArea2File {
+    my $profileRef      = shift;
+    my $xSecAreaOutFile = shift;
+    my $gridDeltaX      = shift;
+    my $gridDeltaY      = shift;
+    my $gridDeltaZ      = shift;
+
+    open(XSECPROF, ">$xSecAreaOutFile") || die "ERROR: Cannot open cross-sectional area output file \"$xSecAreaOutFile\": $!\n";
+    for (my $z=0; $z<=@$profileRef; $z++) {
+        next unless $$profileRef[$z];
+        printf XSECPROF ("%.3f  %.3f\n", $z*$gridDeltaZ, $$profileRef[$z]*$gridDeltaX*$gridDeltaY);
+    }
+    close(XSECPROF);
+}
+
+
+my $sliceRef;
+my $slizeZCenter;
 my $nSliceVoxel;
 
+
 ### Calculate the area occupied by atoms within that slice #####################
-$nSliceVoxel = countSliceOccupancy(Protein::getGridRef());
+($sliceRef, $slizeZCenter) = sliceRangeToSlice(Protein::getGridRef());
+print $slizeZCenter . "\n";
+$nSliceVoxel = countSliceVoxel($sliceRef);
 printf("Area = %0.3f nm²\n", $nSliceVoxel*$gridDeltaX*$gridDeltaY);
 printf("Percent of the XY plane (A = %0.3f nm²) = %0.3f%%\n", $groData{'box'}{'cooX'}*$groData{'box'}{'cooY'}, ($nSliceVoxel*$gridDeltaX*$gridDeltaY*100)/($groData{'box'}{'cooX'}*$groData{'box'}{'cooY'}));
 ################################################################################
@@ -255,7 +294,7 @@ sub printHead {
 
                                squaredance $version
                    Slicewise grid-based analysis of molecules
-              Copyright Thomas H. Schmidt & Christian Kandt, $year
+                        Copyright Thomas H. Schmidt, $year
 
                      http://code.google.com/p/squaredance
 
@@ -605,37 +644,75 @@ sub selectGroupIds {
 
 
 
-sub countSliceOccupancy {
+sub sliceRangeToSlice {
     my $gridRef     = shift;
-    my $zSliceStart = shift;
-    my $zSliceEnd   = shift;
-    my $nSliceVoxel = 0;
-    my @grid2D;
+    my $zSliceStart = shift; # Optional: If no z range is given, the
+    my $zSliceEnd   = shift; #           entire z range of the grid is used.
+    my @slice;
+    my $zRangeSum   = 0;
+    my $zRangeCount = 0;
 
     $zSliceStart = 0 unless $zSliceStart;
     $zSliceEnd = @{$gridRef} unless $zSliceEnd;
 
+    printf("  ---------------------------------\n  Mapping all voxel within the z range (%d-%d) to one slice\r", $zSliceStart, $zSliceEnd);
 
     for (my $z=$zSliceStart; $z<=$zSliceEnd; $z++) {
-        printf("Counting voxels: % 3d%%\r", $z*100/$zSliceEnd) if $main::verbose;
         next unless $$gridRef[$z];
+        printf("  Mapping all voxel within the z range (%f-%f) to one slice: % 3d%%\r", $zSliceStart, $zSliceEnd, $z*100/$zSliceEnd) if $main::verbose;
+
         for (my $x=0; $x<@{$$gridRef[$z]}; $x++) {
             next unless $$gridRef[$z][$x];
+
             for (my $y=0; $y<@{$$gridRef[$z][$x]}; $y++) {
                 next unless $$gridRef[$z][$x][$y];
-                $nSliceVoxel++ if defined $$gridRef[$z][$x][$y]{'type'} && !$grid2D[$x][$y];
-                $grid2D[$x][$y] = 1;
+                $slice[$x][$y]{'type'} = defined $$gridRef[$z][$x][$y]{'type'} ? $$gridRef[$z][$x][$y]{'type'} : 'VOX';
+                $slice[$x][$y]{'sum'}++;
+
+                $zRangeSum += $z;
+                $zRangeCount++;
             }
         }
     }
-    print "\n" if $main::verbose;
+
+    printf("  Mapping all voxel within the z range (%f-%f) to one slice: Finished\n  ---------------------------------\n\n", $zSliceStart, $zSliceEnd);
+
+    return (\@slice, ($zRangeSum/$zRangeCount));
+}
+
+
+
+sub countSliceVoxel {
+    my $sliceRef    = shift;
+    my $xGridStart  = shift;
+    my $xGridEnd    = shift;
+    my $yGridStart  = shift;
+    my $yGridEnd    = shift;
+    my $nSliceVoxel = 0;
+
+#    printf("Counting voxels: % 3d%%\r", $z*100/$zSliceEnd) if $main::verbose;
+
+    $xGridStart = 0 unless $xGridStart;
+    $xGridEnd = @{$sliceRef} unless $xGridEnd;
+    for (my $x=$xGridStart; $x<@{$sliceRef}; $x++) {
+        next unless $$sliceRef[$x];
+
+        $yGridStart = 0 unless $yGridStart;
+        $yGridEnd = @{$sliceRef} unless $yGridEnd;
+        for (my $y=$yGridStart; $y<$yGridEnd; $y++) {
+            next unless $$sliceRef[$x][$y];
+            $nSliceVoxel++ if defined $$sliceRef[$x][$y]{'type'};
+        }
+    }
+#    print "\n" if $main::verbose;
 
     return $nSliceVoxel;
 }
 
 
 
-sub countSliceVoxel {
+
+sub countSliceVoxelOld {
     my $gridRef     = shift;
     my $zSliceStart = shift;
     my $zSliceEnd   = shift;
