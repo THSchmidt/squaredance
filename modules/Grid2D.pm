@@ -16,30 +16,30 @@
 # with squaredance; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-package Protein;
+package Grid2D;
 
 use strict;
+use warnings;
 use pte;
 use FileIO::gro;
 
-require Exporter;
+#require Exporter;
 our $VERSION = 1.0;
-our @ISA     = qw(Exporter);
-our @EXPORT  = qw(analyzeProtein atoms2Grid getGridRef getProtAtomIds setGridDelta grid2GroFile);
+#our @ISA     = qw(Exporter);
+#our @EXPORT  = qw(atoms2Grid getGridRef grid2GroFile setGridDelta);
 
+my @grid;
 
-our @aaList3Letter = qw(ALA CYS ASP GLU PHE GLY HIS ILE LYS LEU MET ASN PRO GLN ARG SER THR VAL TRP TYR);
+my $gridXMin   = 1000;
+my $gridXMax   = 0;
 
-our @grid;
-our $gridXMin = 1000;
-our $gridYMin = 1000;
-our $gridZMin = 1000;
-our $gridXMax = 0;
-our $gridYMax = 0;
-our $gridZMax = 0;
-our $gridDeltaX = 0.5;
-our $gridDeltaY = 0.5;
-our $gridDeltaZ = 0.5;
+my $gridYMin   = 1000;
+my $gridYMax   = 0;
+
+my $gridDeltaX = 0.5;
+my $gridDeltaY = 0.5;
+
+my $coordShift = 1; # Shift all coordinates to avoid negative grid points (PBC).
 
 
 
@@ -50,26 +50,28 @@ sub getGridRef {
 
 sub grid2GroFile {
     my $gridOutFile  = shift;
+    my $defaultZ     = shift;
+
+    $defaultZ = 0 unless $defaultZ;
 
     my $voxId        = 0;
     my %gridGroData;
 
-    for (my $z=$gridZMin; $z<=$gridZMax; $z++) {
-        for (my $x=$gridXMin; $x<=$gridXMax; $x++) {
-            for (my $y=$gridYMin; $y<=$gridYMax; $y++) {
-                next unless $grid[$z][$x][$y];
-                my $resName = defined($grid[$z][$x][$y]{'sum'}) ? sprintf("%d", $grid[$z][$x][$y]{'sum'}) : $grid[$z][$x][$y]{'type'};
-                my %tmpCoords = ('cooX' => $x * $gridDeltaX,
-                                 'cooY' => $y * $gridDeltaY,
-                                 'cooZ' => $z * $gridDeltaZ);
-                push(@{$gridGroData{'atoms'}}, setVoxel(++$voxId, $resName, $grid[$z][$x][$y]{'type'}, $voxId, \%tmpCoords));
-            }
+    for (my $x=$gridXMin; $x<=$gridXMax; $x++) {
+        for (my $y=$gridYMin; $y<=$gridYMax; $y++) {
+            next unless $grid[$x][$y];
+            my $resName = defined($grid[$x][$y]{'sum'}) ? sprintf("%d", $grid[$x][$y]{'sum'}) : $grid[$x][$y]{'type'};
+            my %tmpCoords = ('cooX' => $x * $gridDeltaX - $coordShift,
+                             'cooY' => $y * $gridDeltaY - $coordShift,
+                             'cooZ' => $defaultZ);
+            push(@{$gridGroData{'atoms'}}, setVoxel(++$voxId, $resName, $grid[$x][$y]{'type'}, $voxId, \%tmpCoords));
         }
     }
-    $gridGroData{'title'}  = sprintf("Grid stepwidth x = %f, y = %f, z = %f", $gridDeltaX, $gridDeltaY, $gridDeltaZ);
+
+    $gridGroData{'title'}  = sprintf("Grid stepwidth x = %f, y = %f", $gridDeltaX, $gridDeltaY);
     $gridGroData{'box'}{'cooX'} = $gridXMax * $gridDeltaX;
     $gridGroData{'box'}{'cooY'} = $gridYMax * $gridDeltaY;
-    $gridGroData{'box'}{'cooZ'} = $gridZMax * $gridDeltaZ;
+    $gridGroData{'box'}{'cooZ'} = $defaultZ + 0.01;
     $gridGroData{'atoms'}  = GRO::renumAtoms(\@{$gridGroData{'atoms'}});
     $gridGroData{'nAtoms'} = scalar(@{$gridGroData{'atoms'}}) - 1;
     GRO::writeGro($gridOutFile, \%gridGroData);
@@ -100,22 +102,7 @@ sub setGridDelta {
     return 0 unless defined $_[0];
     $gridDeltaX = $_[0];
     $gridDeltaY = defined $_[1] ? $_[1] : $_[0];
-    $gridDeltaZ = defined $_[2] ? $_[2] : $_[1];
     return 1;
-}
-
-
-
-sub getProtAtomIds {
-    my $coordDataRef = shift;
-    my $aaSearchStr  = join('|', @aaList3Letter);
-    my @protAtomIds;
-
-    for (my $i=1; $i<@{$coordDataRef}; $i++) {
-        next unless $$coordDataRef[$i]{'resName'};
-        push(@protAtomIds, $i) if $$coordDataRef[$i]{'resName'} =~ /$aaSearchStr/;
-    }
-    return @protAtomIds;
 }
 
 
@@ -131,10 +118,8 @@ sub analyze {
     undef(@grid);
     $gridXMin = 1000;
     $gridYMin = 1000;
-    $gridZMin = 1000;
     $gridXMax = 0;
     $gridYMax = 0;
-    $gridZMax = 0;
     ############################################################################
 
     my $gridVolumeProtein;
@@ -180,46 +165,46 @@ sub analyze {
 
 
 sub detectSurface {
-    print "      Detecting protein surface: 0%\r" if $main::verbose;
-    for (my $z=$gridZMin; $z<=$gridZMax; $z++) {
-        for (my $x=$gridXMin; $x<=$gridXMax; $x++) {
-            for (my $y=$gridYMin; $y<=$gridYMax; $y++) {
-                $grid[$z][$x][$y]{'type'} = 'VOX' unless $grid[$z][$x][$y];
-                next unless $grid[$z][$x][$y]{'type'} eq 'PRO';
-                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x-1][$y])) {
-                    $gridXMin = $x if $x < $gridXMin;
-                }
-                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x+1][$y])) {
-                    $gridXMax = $x if $x > $gridXMax;
-                }
-                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x][$y-1])) {
-                    $gridYMin = $y if $y < $gridYMin;
-                }
-                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x][$y+1])) {
-                    $gridYMax = $y if $y > $gridYMax;
-                }
-                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x+1][$y+1])) {
-                    $gridXMax = $x if $x > $gridXMax;
-                    $gridYMax = $y if $y > $gridYMax;
-                }
-                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x+1][$y-1])) {
-                    $gridXMax = $x if $x > $gridXMax;
-                    $gridYMin = $y if $y < $gridYMin;
-                }
-                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x-1][$y+1])) {
-                    $gridXMin = $x if $x < $gridXMin;
-                    $gridYMax = $y if $y > $gridYMax;
-                }
-                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x-1][$y-1])) {
-                    $gridXMin = $x if $x < $gridXMin;
-                    $gridYMin = $y if $y < $gridYMin;
-                }
-            }
-        }
-        printf("      Detecting protein surface: %d%%      \r", $z/$gridZMax*100) if $main::verbose;
-    }
-    print "      Detecting protein surface: 100%      \n" if $main::verbose;
-#    return ($nCavityAreas*$gridDelta2);
+#    print "      Detecting protein surface: 0%\r" if $main::verbose;
+#    for (my $z=$gridZMin; $z<=$gridZMax; $z++) {
+#        for (my $x=$gridXMin; $x<=$gridXMax; $x++) {
+#            for (my $y=$gridYMin; $y<=$gridYMax; $y++) {
+#                $grid[$z][$x][$y]{'type'} = 'VOX' unless $grid[$z][$x][$y];
+#                next unless $grid[$z][$x][$y]{'type'} eq 'PRO';
+#                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x-1][$y])) {
+#                    $gridXMin = $x if $x < $gridXMin;
+#                }
+#                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x+1][$y])) {
+#                    $gridXMax = $x if $x > $gridXMax;
+#                }
+#                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x][$y-1])) {
+#                    $gridYMin = $y if $y < $gridYMin;
+#                }
+#                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x][$y+1])) {
+#                    $gridYMax = $y if $y > $gridYMax;
+#                }
+#                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x+1][$y+1])) {
+#                    $gridXMax = $x if $x > $gridXMax;
+#                    $gridYMax = $y if $y > $gridYMax;
+#                }
+#                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x+1][$y-1])) {
+#                    $gridXMax = $x if $x > $gridXMax;
+#                    $gridYMin = $y if $y < $gridYMin;
+#                }
+#                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x-1][$y+1])) {
+#                    $gridXMin = $x if $x < $gridXMin;
+#                    $gridYMax = $y if $y > $gridYMax;
+#                }
+#                if (getNeighborVox($grid[$z][$x][$y], $grid[$z][$x-1][$y-1])) {
+#                    $gridXMin = $x if $x < $gridXMin;
+#                    $gridYMin = $y if $y < $gridYMin;
+#                }
+#            }
+#        }
+#        printf("      Detecting protein surface: %d%%      \r", $z/$gridZMax*100) if $main::verbose;
+#    }
+#    print "      Detecting protein surface: 100%      \n" if $main::verbose;
+##    return ($nCavityAreas*$gridDelta2);
 }
 
 
@@ -243,11 +228,7 @@ sub getNeighborVox {
 sub atoms2Grid {
     my $atomsIdsRef  = shift;
     my $coordDataRef = shift;
-    my $boxRef       = shift;
 
-    my $gridBoxX = round($$boxRef{'cooX'} / $gridDeltaX, 1);
-    my $gridBoxY = round($$boxRef{'cooY'} / $gridDeltaY, 1);
-    my $gridBoxZ = round($$boxRef{'cooZ'} / $gridDeltaZ, 1);
     my $atomId   = 0;
 
     print "  ---------------------------------\n  Mapping atoms to the grid\r";
@@ -261,35 +242,23 @@ sub atoms2Grid {
         my $radius2 = $radius * $radius;
 
 
-        my $tmpGridX = sprintf("%d", round(($$coordDataRef[$_]{'cooX'}+1) / $gridDeltaX, 1));
-        my $tmpGridY = sprintf("%d", round(($$coordDataRef[$_]{'cooY'}+1) / $gridDeltaY, 1));
-        my $tmpGridZ = sprintf("%d", round(($$coordDataRef[$_]{'cooZ'}+1) / $gridDeltaZ, 1));
-#        my $subrangeZ = sprintf("%d", round($radius / $gridDeltaZ, 1));
-#        print $subrangeZ . " " . ($radius / $gridDelta) . "\n"; exit;
-        my $subrangeX = sprintf("%d", round($radius / $gridDeltaX, 1));
-        my $subrangeY = sprintf("%d", round($radius / $gridDeltaY, 1));
-        my $subrangeZ = $radius > $gridDeltaZ ? sprintf("%d", round($radius / $gridDeltaZ, 1)) : 0;
-#        my $subrangeZ = 0;
+        my $tmpGridX = sprintf("%d", round(($$coordDataRef[$_]{'cooX'} + $coordShift) / $gridDeltaX, 1));
+        my $tmpGridY = sprintf("%d", round(($$coordDataRef[$_]{'cooY'} + $coordShift) / $gridDeltaY, 1));
+        my $subrangeX = $radius > $gridDeltaX ? sprintf("%d", round($radius / $gridDeltaX, 1)) : 0;
+        my $subrangeY = $radius > $gridDeltaY ? sprintf("%d", round($radius / $gridDeltaY, 1)) : 0;
 
-        for (my $z=($tmpGridZ-$subrangeZ); $z<=($tmpGridZ+$subrangeZ); $z++) {
-            for (my $x=($tmpGridX-$subrangeX); $x<=($tmpGridX+$subrangeX); $x++) {
-                for (my $y=($tmpGridY-$subrangeY); $y<=($tmpGridY+$subrangeY); $y++) {
-                    my $dx = $$coordDataRef[$_]{'cooX'}+1 - $x * $gridDeltaX;
-                    my $dy = $$coordDataRef[$_]{'cooY'}+1 - $y * $gridDeltaY;
-                    my $dz = $$coordDataRef[$_]{'cooZ'}+1 - $z * $gridDeltaZ;
-                    next if ($dx*$dx + $dy*$dy) > $radius2;
-                    next if ($dx*$dx + $dz*$dz) > $radius2;
-                    next if ($dy*$dy + $dz*$dz) > $radius2;
+        for (my $x=($tmpGridX-$subrangeX); $x<=($tmpGridX+$subrangeX); $x++) {
+            for (my $y=($tmpGridY-$subrangeY); $y<=($tmpGridY+$subrangeY); $y++) {
+                my $dx = $$coordDataRef[$_]{'cooX'} + $coordShift - $x * $gridDeltaX;
+                my $dy = $$coordDataRef[$_]{'cooY'} + $coordShift - $y * $gridDeltaY;
+                next if ($dx*$dx + $dy*$dy) > $radius2;
 
-                    $grid[$z][$x][$y]{'type'} = $$coordDataRef[$_]{'resName'};
+                $grid[$x][$y]{'type'} = $$coordDataRef[$_]{'resName'};
 
-                    $gridXMin = $x if $x < $gridXMin;
-                    $gridYMin = $y if $y < $gridYMin;
-                    $gridZMin = $z if $z < $gridZMin;
-                    $gridXMax = $x if $x > $gridXMax;
-                    $gridYMax = $y if $y > $gridYMax;
-                    $gridZMax = $z if $z > $gridZMax;
-                }
+                $gridXMin = $x if $x < $gridXMin;
+                $gridYMin = $y if $y < $gridYMin;
+                $gridXMax = $x if $x > $gridXMax;
+                $gridYMax = $y if $y > $gridYMax;
             }
         }
         printf("  Mapping atoms to the grid: %d%%\r", ++$atomId*100/@{$atomsIdsRef}) if $main::verbose;
@@ -309,116 +278,53 @@ sub atoms2Grid {
 
 
 
-sub protein2Grid {
-    my $atomsIdsRef  = shift;
-    my $coordDataRef = shift;
-
-    print "      Mapping atoms to the grid: 0%\r" if $main::verbose;
-    foreach (@{$atomsIdsRef}) {
-        next unless $$coordDataRef[$_]{'cooZ'};
-
-#        my $element = substr($$coordDataRef[$_]{'atomName'}, 0, 1);
-        my $element = $$coordDataRef[$_]{'atomName'};
-        my $radius  = PTE::getRadius($element);
-        my $radius2 = $radius * $radius;
-
-        my $tmpGridX = sprintf("%d", round($$coordDataRef[$_]{'cooX'} / $gridDeltaX, 1));
-        my $tmpGridY = sprintf("%d", round($$coordDataRef[$_]{'cooY'} / $gridDeltaY, 1));
-        my $tmpGridZ = sprintf("%d", round($$coordDataRef[$_]{'cooZ'} / $gridDeltaZ, 1));
-#        my $subrangeZ = sprintf("%d", round($radius / $gridDeltaZ, 1));
-#        print $subrangeZ . " " . ($radius / $gridDelta) . "\n"; exit;
-        my $subrangeX = sprintf("%d", round($radius / $gridDeltaX, 1));
-        my $subrangeY = sprintf("%d", round($radius / $gridDeltaY, 1));
-        my $subrangeZ = $radius > $gridDeltaZ ? sprintf("%d", round($radius / $gridDeltaZ, 1)) : 0;
-#        my $subrangeZ = 0;
-
-        for (my $z=($tmpGridZ-$subrangeZ); $z<=($tmpGridZ+$subrangeZ); $z++) {
-            for (my $x=($tmpGridX-$subrangeX); $x<=($tmpGridX+$subrangeX); $x++) {
-                for (my $y=($tmpGridY-$subrangeY); $y<=($tmpGridY+$subrangeY); $y++) {
-                    my $dx = $$coordDataRef[$_]{'cooX'} - $x * $gridDeltaX;
-                    my $dy = $$coordDataRef[$_]{'cooY'} - $y * $gridDeltaY;
-                    my $dz = $$coordDataRef[$_]{'cooZ'} - $z * $gridDeltaZ;
-                    next if ($dx*$dx + $dy*$dy) > $radius2;
-                    next if ($dx*$dx + $dz*$dz) > $radius2;
-                    next if ($dy*$dy + $dz*$dz) > $radius2;
-
-                    $grid[$z][$x][$y]{'type'} = 'PRO';
-#                   $$coordDataRef[$_]{'resName'} =~ /ARG|HIS|LYS|ASP|GLU/ ? ...; # For atomistic models.
-                    $$coordDataRef[$_]{'resName'} =~ /CHA/ ? $grid[$z][$x][$y]{'sum'}+=2000*$gridDeltaZ : $grid[$z][$x][$y]{'sum'}-=$gridDeltaZ;
-
-                    $gridXMin = $x if $x < $gridXMin;
-                    $gridYMin = $y if $y < $gridYMin;
-                    $gridZMin = $z if $z < $gridZMin;
-                    $gridXMax = $x if $x > $gridXMax;
-                    $gridYMax = $y if $y > $gridYMax;
-                    $gridZMax = $z if $z > $gridZMax;
-                }
-            }
-        }
-        printf("      Mapping atoms to the grid: %d%%\r", (++$$coordDataRef[$_]{'serial'})/scalar(@{$atomsIdsRef})*100) if $main::verbose;
-    }
-
-    ### Plus imaginary space for surface voxels ################################
-    $gridXMin--;
-    $gridYMin--;
-    $gridXMax++;
-    $gridYMax++;
-    ############################################################################
-
-    printf("      Mapping atoms to the grid: 100%%\n") if $main::verbose;
-
-    return 1;
-}
-
-
-
 sub detectCavity {
-    my $extCavDetection = shift;
-
-    my $nCavityAreas = 0;
-    my $gridDelta2   = $gridDeltaX * $gridDeltaY;
-
-
-    print "      Detecting protein internal cavities: 0.0000 nm^2 possible\r" if $main::verbose;
-
-    ### Invert protein grid (set each non-protein voxel as cavity) #############
-    for (my $z=$gridZMin; $z<=$gridZMax; $z++) {
-        for (my $x=$gridXMin; $x<=$gridXMax; $x++) {
-            for (my $y=$gridYMin; $y<=$gridYMax; $y++) {
-                next if defined $grid[$z][$x][$y] && $grid[$z][$x][$y];
-                $grid[$z][$x][$y]{'type'} = 'INT';
-                $nCavityAreas++;
-            }
-            printf("      Detecting protein internal cavities: %.4f nm^2 possible      \r", $nCavityAreas*$gridDelta2) if $main::verbose;
-        }
-    }
-    ############################################################################
-
-
-    ### Washing out the cavities ###############################################
-    for (my $z=$gridZMin; $z<=$gridZMax; $z++) {
-        for (my $i=0; $i<2; $i++) {
-            my $foundExcl1 = 1;
-            my $foundExcl2 = 1;
-            for (my $x=$gridXMin; $x<=$gridXMax; $x++) {
-                my $neighbCellX = $x - 1;
-                $nCavityAreas -= $foundExcl1 = washingOutY($x, $neighbCellX, $grid[$z], $extCavDetection);
-                printf("      Detecting protein internal cavities: %.4f nm^2 possible      \r", $nCavityAreas*$gridDelta2) if $main::verbose;
-            }
-
-            for (my $x=$gridXMax; $x>=$gridXMin; $x--) {
-                my $neighbCellX = $x + 1;
-                $nCavityAreas -= $foundExcl2 = washingOutY($x, $neighbCellX, $grid[$z], $extCavDetection);
-                printf("      Detecting protein internal cavities: %.4f nm^2 possible      \r", $nCavityAreas*$gridDelta2) if $main::verbose;
-            }
-            $i = 0 if $foundExcl1 || $foundExcl2;
-        }
-    }
-    ############################################################################
-
-    printf("      Detecting protein internal cavities: %.4f nm^2 detected      \n", $nCavityAreas*$gridDelta2) if $main::verbose;
-
-    return ($nCavityAreas*$gridDelta2);
+#    my $extCavDetection = shift;
+#
+#    my $nCavityAreas = 0;
+#    my $gridDelta2   = $gridDeltaX * $gridDeltaY;
+#
+#
+#    print "      Detecting protein internal cavities: 0.0000 nm^2 possible\r" if $main::verbose;
+#
+#    ### Invert protein grid (set each non-protein voxel as cavity) #############
+#    for (my $z=$gridZMin; $z<=$gridZMax; $z++) {
+#        for (my $x=$gridXMin; $x<=$gridXMax; $x++) {
+#            for (my $y=$gridYMin; $y<=$gridYMax; $y++) {
+#                next if defined $grid[$z][$x][$y] && $grid[$z][$x][$y];
+#                $grid[$z][$x][$y]{'type'} = 'INT';
+#                $nCavityAreas++;
+#            }
+#            printf("      Detecting protein internal cavities: %.4f nm^2 possible      \r", $nCavityAreas*$gridDelta2) if $main::verbose;
+#        }
+#    }
+#    ############################################################################
+#
+#
+#    ### Washing out the cavities ###############################################
+#    for (my $z=$gridZMin; $z<=$gridZMax; $z++) {
+#        for (my $i=0; $i<2; $i++) {
+#            my $foundExcl1 = 1;
+#            my $foundExcl2 = 1;
+#            for (my $x=$gridXMin; $x<=$gridXMax; $x++) {
+#                my $neighbCellX = $x - 1;
+#                $nCavityAreas -= $foundExcl1 = washingOutY($x, $neighbCellX, $grid[$z], $extCavDetection);
+#                printf("      Detecting protein internal cavities: %.4f nm^2 possible      \r", $nCavityAreas*$gridDelta2) if $main::verbose;
+#            }
+#
+#            for (my $x=$gridXMax; $x>=$gridXMin; $x--) {
+#                my $neighbCellX = $x + 1;
+#                $nCavityAreas -= $foundExcl2 = washingOutY($x, $neighbCellX, $grid[$z], $extCavDetection);
+#                printf("      Detecting protein internal cavities: %.4f nm^2 possible      \r", $nCavityAreas*$gridDelta2) if $main::verbose;
+#            }
+#            $i = 0 if $foundExcl1 || $foundExcl2;
+#        }
+#    }
+#    ############################################################################
+#
+#    printf("      Detecting protein internal cavities: %.4f nm^2 detected      \n", $nCavityAreas*$gridDelta2) if $main::verbose;
+#
+#    return ($nCavityAreas*$gridDelta2);
 }
 
 
