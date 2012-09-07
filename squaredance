@@ -54,6 +54,7 @@ my $gridDeltaX    = 0.05;                # Grid spacing in the x direction / nm.
 my $gridDeltaY    = 0.05;                # Grid spacing in the y direction / nm.
 my $gridDeltaZ    = 0.05;                # Grid spacing in the z direction / nm.
 my $aaRegex       = "(ALA|ARG|ASN|ASP|CYS|GLU|GLN|GLY|HIS|ILE|LEU|LYS|MET|PHE|PRO|SER|THR|TRP|TYR|VAL)";
+my $cavProbeRad   = 0.14;
 #my $lipidResname = '^POP[ACEG]?$';      # Regex for the automatic detection of lipid molecules in the membrane GRO file.
 #my $nMembranes    = 1;
 #my $withPlanes    = 0;                  # Add the planes for highlighting the borders of the hydrophobic range.
@@ -61,7 +62,9 @@ my $aaRegex       = "(ALA|ARG|ASN|ASP|CYS|GLU|GLN|GLY|HIS|ILE|LEU|LYS|MET|PHE|PR
 #my $membThickness = 4.86;               # ...if it could not be measured.
 my $range2Slice   = 0;                  # Map all atoms to one slice.
 my $helpAndQuit   = 0;                  # Print out program help.
-#my @rotAngs       = (0, 90, 0, 90);
+
+my $zLimitLower = 12.9;
+my $zLimitUpper = 15.8;
 ################################################################################
 
 
@@ -73,6 +76,7 @@ my $version = 'beta1';
 my %groData;      # Filled by "GROFiles::readGro(<GROFILE>)".
 my @ndxData;      # Filled by "NDXFiles::readNdx(<NDXFILE>)".
 my @atomIds;
+
 
 ### CHECKED (above)
 ###################
@@ -118,8 +122,11 @@ Cmdline::addCmdlParam('flag',   'h',   'bool', \$helpAndQuit, $helpAndQuit ? 'ye
 Cmdline::addCmdlParam('scalar', 'dx',  'real', \$gridDeltaX, $gridDeltaX, 'Grid spacing along the X axis');
 Cmdline::addCmdlParam('scalar', 'dy',  'real', \$gridDeltaY, $gridDeltaY, 'Grid spacing along the Y axis');
 Cmdline::addCmdlParam('scalar', 'dz',  'real', \$gridDeltaZ, $gridDeltaZ, 'Grid spacing along the Z axis');
+Cmdline::addCmdlParam('scalar', 'cr',  'real', \$cavProbeRad, $cavProbeRad, 'Radius of the cavity probe.');
 Cmdline::addCmdlParam('flag',   'r2s', 'bool', \$range2Slice, $range2Slice ? 'yes' : 'no', 'Map all defined atoms within a range to one slice.');
 Cmdline::addCmdlParam('flag',   'v',   'bool', \$verbose, $verbose ? 'yes' : 'no', 'Be loud and noisy');
+Cmdline::addCmdlParam('scalar', 'zl',  'real', \$zLimitLower, $zLimitLower, 'Lower limit of the z range.');
+Cmdline::addCmdlParam('scalar', 'zu',  'real', \$zLimitUpper, $zLimitUpper, 'Upper limit of the z range.');
 
 Cmdline::parser();
 ################################################################################
@@ -172,15 +179,27 @@ if ($range2Slice) {
 
 ### Normal workflow: analyze slice by slice ####################################
 Grid3D::setGridDelta($gridDeltaX, $gridDeltaY, $gridDeltaZ); # Set the grid spacing in x, y & z.
-Grid3D::atoms2Grid(\@atomIds, $groData{'atoms'}, $groData{'box'});
-Grid3D::detectCavity();
-Grid3D::grid2GroFile($gridOutFile) if $gridOutFile; # Print grid-coordinates.
+Grid3D::atoms2Grid(\@atomIds, $groData{'atoms'});
+Grid3D::detectCavity($cavProbeRad);
+Grid3D::getVdwSurf();
+Grid3D::grid2GroFile(Grid3D::getGridOccRef(), $gridOutFile) if $gridOutFile; # Print grid-coordinates.
+Grid3D::grid2GroFile(Grid3D::getGridIntRef(), 'grid.int.gro') if $gridOutFile; # Print grid-coordinates.
+Grid3D::grid2GroFile(Grid3D::getProbeRef(),   'grid.probe.gro') if $gridOutFile; # Print grid-coordinates.
+Grid3D::grid2GroFile(Grid3D::getGridVdwSurfRef(), 'grid.vdws.gro') if $gridOutFile; # Print grid-coordinates.
 
-my $zProfileRef = getZProfile(Grid3D::getGridRef());
 
-
+my $zProfileRef = getZProfile(Grid3D::getGridOccRef());
 my $xSecAreaOutFile = "xsecarea.dat";
 xSecArea2File($zProfileRef, $xSecAreaOutFile, $gridDeltaX, $gridDeltaY, $gridDeltaZ);
+
+$zProfileRef = getZProfile(Grid3D::getGridIntRef());
+$xSecAreaOutFile = "xsecarea.int.dat";
+xSecArea2File($zProfileRef, $xSecAreaOutFile, $gridDeltaX, $gridDeltaY, $gridDeltaZ);
+
+
+### Special: Count the number of charged vdw surf voxels within a defined z range.
+print Grid3D::countVoxelsWithinZRange(Grid3D::getGridVdwSurfRef(), $zLimitLower, $zLimitUpper, "(ARG|HIS|LYS|ASP|GLU)");
+print "\n";
 
 exit;
 ################################################################################
