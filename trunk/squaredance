@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 
-# Copyright 2012 Thomas H. Schmidt
+# Copyright 2013 Thomas H. Schmidt
 #
 # This file is part of squaredance.
 #
@@ -254,53 +254,8 @@ printf("Area = %0.3f nm²\n", $nSliceVoxel*$gridDeltaX*$gridDeltaY);
 printf("Percent of the XY plane (A = %0.3f nm²) = %0.3f%%\n", $groData{'box'}{'cooX'}*$groData{'box'}{'cooY'}, ($nSliceVoxel*$gridDeltaX*$gridDeltaY*100)/($groData{'box'}{'cooX'}*$groData{'box'}{'cooY'}));
 ################################################################################
 
-
-
-### Determine the hydophobic belt ##############################################
-#my %belt = detectBelts($sliceScoreRef, $gridDeltaZ, $thicknHphobicUp, $thicknHphobicLow, $thicknHphobic, $isTMProt);
-################################################################################
-
-#$sliceScoreRef = getSliceScore($gridRef, $gridDeltaZ, $contProtRef, $hsprofOutFile);
-
-#$beltZCenter = $belt{'hphobCent'} * $gridDeltaZ if $belt{'hphobCent'};
-
-
-
-#my @protAtomIds = getAtomIds($protData{'atoms'});
-#my @membAtomIds = getAtomIds($groData{'atoms'});
-
-
-
-#### Translate all protein atoms to the center of the membrane box #############
-#centerGroup(\@protAtomIds, $protData{'atoms'}, $groData{'box'});
-################################################################################
-
-
-
-### For validation only: build a couple of dummy atoms #########################
-#buildDummyPlane($protData{'atoms'}, \@protAtomIds, $beltZCenter, $thicknHphobicUp, $thicknHphobicLow) if $withPlanes;
-################################################################################
-
-
-
-#unless (defined $beltZCenter) {
-#    print "Sorry, don't found a hydrophobic belt...\n";
-#    exit;
-#}
-
-
-### Translate all bilayer atoms to the center (z-axis) of the hydrophob. belt. #
-#my $zTranslVec = $beltZCenter - $membZCenter;
-#zTranslateGroup(\@membAtomIds, $groData{'atoms'}, $zTranslVec);
-################################################################################
-
-
-
-### Combine system components and write out the coordinates ####################
-#my %combData = combGroData(\%protData, \%groData);
-#GRO::writeGro($groOutFile, \%combData);
 exit;
-################################################################################
+
 
 
 
@@ -388,17 +343,17 @@ EndOfCopyright
 
 
 
-sub getAtomIdsByResname {
-    my $atomDataRef  = shift;
-    my $resnameRegex = shift;
-
-    my @atomIds;
-
-    for (my $i=1; $i<@{$atomDataRef}; $i++) {
-        push(@atomIds, $i) if $$atomDataRef[$i]{'resName'} =~ /$resnameRegex/;
-    }
-    return @atomIds;
-}
+#sub getAtomIdsByResname {
+#    my $atomDataRef  = shift;
+#    my $resnameRegex = shift;
+#
+#    my @atomIds;
+#
+#    for (my $i=1; $i<@{$atomDataRef}; $i++) {
+#        push(@atomIds, $i) if $$atomDataRef[$i]{'resName'} =~ /$resnameRegex/;
+#    }
+#    return @atomIds;
+#}
 
 
 
@@ -415,71 +370,6 @@ sub getMembZCenter {
 }
 
 
-
-#sub buildDummyPlane {
-#    my $atomDataRef = shift;
-#    my $atomIdsRef  = shift;
-#    my $beltZCenter = shift;
-#
-#    my $residue     = $$atomDataRef[-1]{'residue'};
-#    my $serial      = $$atomDataRef[-1]{'serial'};
-#    my $radius      = 4;
-#    my $radius2     = $radius*$radius;
-#    my $gridSpacing = 0.1;
-#
-#    ### Detect the geometrical center and place a bead #########################
-#    my %geoCenter = getGeoCenter($atomIdsRef, $atomDataRef);
-#    my %dummyCoords = ('cooX' => $geoCenter{'cooX'},
-#                       'cooY' => $geoCenter{'cooY'},
-#                       'cooZ' => $beltZCenter);
-#    push(@{$atomDataRef}, setCgAtom(++$residue, 'DUM', 'CEN', ++$serial, \%dummyCoords));
-#    ############################################################################
-#
-#
-#    ### Build the plane around the geometrical center ##########################
-#    for (my $x=$geoCenter{'cooX'}-$radius; $x<=$geoCenter{'cooX'}+$radius; $x+=$gridSpacing) {
-#        for (my $y=$geoCenter{'cooY'}-$radius; $y<=$geoCenter{'cooY'}+$radius; $y+=$gridSpacing) {
-#            my $dx = $geoCenter{'cooX'} - $x;
-#            my $dy = $geoCenter{'cooY'} - $y;
-#            next if ($dx*$dx + $dy*$dy) > $radius2;
-#            my %dummyCoords = ('cooX' => $x,
-#                               'cooY' => $y,
-#                               'cooZ' => $beltZCenter);
-#            push(@{$atomDataRef}, setCgAtom(++$residue, 'DUM', 'DUM', ++$serial, \%dummyCoords));
-#        }
-#    }
-#    ############################################################################
-#
-#
-#    ### Build the plane limiting the hydrophobic range upwards #################
-#    for (my $x=$geoCenter{'cooX'}-$radius; $x<=$geoCenter{'cooX'}+$radius; $x+=$gridSpacing) {
-#        for (my $y=$geoCenter{'cooY'}-$radius; $y<=$geoCenter{'cooY'}+$radius; $y+=$gridSpacing) {
-#            my $dx = $geoCenter{'cooX'} - $x;
-#            my $dy = $geoCenter{'cooY'} - $y;
-#            next if ($dx*$dx + $dy*$dy) > $radius2;
-#            my %dummyCoords = ('cooX' => $x,
-#                               'cooY' => $y,
-#                               'cooZ' => $beltZCenter+$thicknHphobicUp);
-#            push(@{$atomDataRef}, setCgAtom(++$residue, 'DUM', 'UPP', ++$serial, \%dummyCoords));
-#        }
-#    }
-#    ############################################################################
-#
-#
-#    ### Build the plane limiting the hydrophobic range downwards ###############
-#    for (my $x=$geoCenter{'cooX'}-$radius; $x<=$geoCenter{'cooX'}+$radius; $x+=$gridSpacing) {
-#        for (my $y=$geoCenter{'cooY'}-$radius; $y<=$geoCenter{'cooY'}+$radius; $y+=$gridSpacing) {
-#            my $dx = $geoCenter{'cooX'} - $x;
-#            my $dy = $geoCenter{'cooY'} - $y;
-#            next if ($dx*$dx + $dy*$dy) > $radius2;
-#            my %dummyCoords = ('cooX' => $x,
-#                               'cooY' => $y,
-#                               'cooZ' => $beltZCenter-$thicknHphobicLow);
-#            push(@{$atomDataRef}, setCgAtom(++$residue, 'DUM', 'LOW', ++$serial, \%dummyCoords));
-#        }
-#    }
-#    ############################################################################
-#}
 
 
 ################################################################################
