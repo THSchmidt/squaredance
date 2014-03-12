@@ -44,7 +44,7 @@ my $gridDeltaX = 0.5;
 my $gridDeltaY = 0.5;
 my $gridDeltaZ = 0.5;
 
-my $coordShift = 2; # Shift all coordinates to avoid negative grid points (PBC). FIND A BETTER SOLUTION FOR THIS!
+#my $coordShift = 2; # Shift all coordinates to avoid negative grid points (PBC). FIND A BETTER SOLUTION FOR THIS!
 
 
 
@@ -90,57 +90,109 @@ sub atoms2Grid {
     my $atomsIdsRef  = shift;
     my $coordDataRef = shift;
     my $gridOccVal   = shift;
+    my $pbcWrap      = shift;
 
     my $atomId   = 0;
+    my $boxGridX;
+    my $boxGridY;
+    my $boxGridZ;
 
     print "  ---------------------------------\n  Mapping atoms to the grid\r";
+
+    if ($pbcWrap) {
+        $boxGridX = sprintf("%d", round($$coordDataRef{'box'}{'cooX'} / $gridDeltaX, 1));
+        $boxGridY = sprintf("%d", round($$coordDataRef{'box'}{'cooY'} / $gridDeltaY, 1));
+        $boxGridZ = sprintf("%d", round($$coordDataRef{'box'}{'cooZ'} / $gridDeltaZ, 1));
+    }
 
     foreach (@{$atomsIdsRef}) {
         next unless $$coordDataRef[$_]{'cooZ'};
 
+        ### Get the van der Waals radius of the atom ###########################
         my $element = substr($$coordDataRef[$_]{'atomName'}, 0, 1);
 #        my $element = $$coordDataRef[$_]{'atomName'};
         my $radius  = PTE::getRadius($element)*1.4;
         my $radius2 = $radius * $radius;
+        ########################################################################
 
 
-        my $tmpGridX = sprintf("%d", round(($$coordDataRef[$_]{'cooX'} + $coordShift) / $gridDeltaX, 1));
-        my $tmpGridY = sprintf("%d", round(($$coordDataRef[$_]{'cooY'} + $coordShift) / $gridDeltaY, 1));
-        my $tmpGridZ = sprintf("%d", round(($$coordDataRef[$_]{'cooZ'} + $coordShift) / $gridDeltaZ, 1));
+        ### Get the grid cell next to the current coordinates ##################
+        my $tmpGridX = sprintf("%d", round(($$coordDataRef[$_]{'cooX'}) / $gridDeltaX, 1));
+        my $tmpGridY = sprintf("%d", round(($$coordDataRef[$_]{'cooY'}) / $gridDeltaY, 1));
+        my $tmpGridZ = sprintf("%d", round(($$coordDataRef[$_]{'cooZ'}) / $gridDeltaZ, 1));
+        ########################################################################
+
+
+
+
+        ### Get the grid points the atom radius is able to span ################
 #        my $subrangeX = $radius > $gridDeltaX ? sprintf("%d", round($radius / $gridDeltaX, 1)) : 0;
         my $subrangeX = sprintf("%d", round($radius / $gridDeltaX, 1));
 #        my $subrangeY = $radius > $gridDeltaY ? sprintf("%d", round($radius / $gridDeltaY, 1)) : 0;
         my $subrangeY = sprintf("%d", round($radius / $gridDeltaY, 1));
 #        my $subrangeZ = $radius > $gridDeltaZ ? sprintf("%d", round($radius / $gridDeltaZ, 1)) : 0;
         my $subrangeZ = sprintf("%d", round($radius / $gridDeltaZ, 1));
+        ########################################################################
 
+
+        ### Check the occupancy and map the radius to the grid #################
         for (my $z=($tmpGridZ-$subrangeZ); $z<=($tmpGridZ+$subrangeZ); $z++) {
             for (my $x=($tmpGridX-$subrangeX); $x<=($tmpGridX+$subrangeX); $x++) {
                 for (my $y=($tmpGridY-$subrangeY); $y<=($tmpGridY+$subrangeY); $y++) {
-                    my $dx = $$coordDataRef[$_]{'cooX'} + $coordShift - $x * $gridDeltaX;
-                    my $dy = $$coordDataRef[$_]{'cooY'} + $coordShift - $y * $gridDeltaY;
+                    my $dx = $$coordDataRef[$_]{'cooX'} - $x * $gridDeltaX;
+                    my $dy = $$coordDataRef[$_]{'cooY'} - $y * $gridDeltaY;
                     next if ($dx*$dx + $dy*$dy) > $radius2;
-                    my $dz = $$coordDataRef[$_]{'cooZ'} + $coordShift - $z * $gridDeltaZ;
+                    my $dz = $$coordDataRef[$_]{'cooZ'} - $z * $gridDeltaZ;
                     next if ($dx*$dx + $dz*$dz) > $radius2;
                     next if ($dy*$dy + $dz*$dz) > $radius2;
 
-                    $gridOcc[$z][$x][$y] = $gridOccVal ? $gridOccVal : $$coordDataRef[$_]{'resName'};
+                    my $gX = $x;
+                    my $gY = $y;
+                    my $gZ = $z;
 
-                    $gridXMin[$z] = $x if !defined $gridXMin[$z] || $x < $gridXMin[$z];
-                    $gridXMax[$z] = $x if !defined $gridXMax[$z] || $x > $gridXMax[$z];
-                    $gridYMin[$z] = $y if !defined $gridYMin[$z] || $y < $gridYMin[$z];
-                    $gridYMax[$z] = $y if !defined $gridYMax[$z] || $y > $gridYMax[$z];
-                    $gridZMin     = $z if $z < $gridZMin;
-                    $gridZMax     = $z if $z > $gridZMax;
+                    if ($pbcWrap) {
+                        $gX += pbcWrap($gX, $boxGridX);
+                        $gY += pbcWrap($gY, $boxGridY);
+                        $gZ += pbcWrap($gZ, $boxGridZ);
+                    }
+
+                    $gridOcc[$gZ][$gX][$gY] = $gridOccVal ? $gridOccVal : $$coordDataRef{'atoms'}[$_]{'resName'};
+
+                    $gridXMin[$gZ] = $gX if !defined $gridXMin[$gZ] || $gX < $gridXMin[$gZ];
+                    $gridXMax[$gZ] = $gX if !defined $gridXMax[$gZ] || $gX > $gridXMax[$gZ];
+                    $gridYMin[$gZ] = $gY if !defined $gridYMin[$gZ] || $gY < $gridYMin[$gZ];
+                    $gridYMax[$gZ] = $gY if !defined $gridYMax[$gZ] || $gY > $gridYMax[$gZ];
+                    $gridZMin      = $gZ if $gZ < $gridZMin;
+                    $gridZMax      = $gZ if $gZ > $gridZMax;
+
+#                    $gridOcc[$z][$x][$y] = $gridOccVal ? $gridOccVal : $$coordDataRef[$_]{'resName'};
+
+#                    $gridXMin[$z] = $x if !defined $gridXMin[$z] || $x < $gridXMin[$z];
+#                    $gridXMax[$z] = $x if !defined $gridXMax[$z] || $x > $gridXMax[$z];
+#                    $gridYMin[$z] = $y if !defined $gridYMin[$z] || $y < $gridYMin[$z];
+#                    $gridYMax[$z] = $y if !defined $gridYMax[$z] || $y > $gridYMax[$z];
+#                    $gridZMin     = $z if $z < $gridZMin;
+#                    $gridZMax     = $z if $z > $gridZMax;
                 }
             }
         }
         printf("  Mapping atoms to the grid: %d%%\r", ++$atomId*100/@{$atomsIdsRef}) if $main::verbose;
     }
 
-    printf("  Mapping atoms to the grid: Finished\n  ---------------------------------\n\n") if $main::verbose;
+    printf("  Mapping atoms to the grid: Finished\n  ---------------------------------\n\n");
 
     return 1;
+}
+
+
+
+sub pbcWrap {
+    my $coord  = shift;
+    my $boxDim = shift;
+
+    return $boxDim if $coord < 0;
+    return (-1*$boxDim) if $coord >= $boxDim;
+    return 0;
 }
 
 
@@ -166,14 +218,15 @@ sub getVdwSurf {
 }
 
 
+
 sub countVoxelsWithinZRange {
     my $gridRef     = shift;
     my $zLimitLower = shift;
     my $zLimitUpper = shift;
     my $valueRegex  = shift;
 
-    my $zLimitLowerGrid = sprintf("%d", round(($zLimitLower + $coordShift) / $gridDeltaZ, 1));
-    my $zLimitUpperGrid = sprintf("%d", round(($zLimitUpper + $coordShift) / $gridDeltaZ, 1));
+    my $zLimitLowerGrid = sprintf("%d", round($zLimitLower / $gridDeltaZ, 1));
+    my $zLimitUpperGrid = sprintf("%d", round($zLimitUpper / $gridDeltaZ, 1));
     my $nVoxels = 0;
     my $nVoxelsTotal = 0;
 
@@ -574,7 +627,7 @@ sub searchOverlaps {
         $nCellsMax++;
     }
     if ($protLimitMin && $protLimitMax) {
-        printf("  Cell (%f,%f) is limited by protein, forming a cavity with cells (%f,%f-%f)\n", ($x*$gridDeltaX-$coordShift)*10, ($y*$gridDeltaY-$coordShift)*10, ($x*$gridDeltaX-$coordShift)*10, (($y-$nCellsMin)*$gridDeltaY-$coordShift)*10, (($y+$nCellsMax)*$gridDeltaY-$coordShift)*10, ($y*$gridDeltaY-$coordShift)*10) if $z == 53;
+        printf("  Cell (%f,%f) is limited by protein, forming a cavity with cells (%f,%f-%f)\n", ($x*$gridDeltaX)*10, ($y*$gridDeltaY)*10, ($x*$gridDeltaX)*10, (($y-$nCellsMin)*$gridDeltaY)*10, (($y+$nCellsMax)*$gridDeltaY)*10, ($y*$gridDeltaY)*10) if $z == 53;
         for (my $cavY=$nCellsMin; $cavY<=$nCellsMax; $cavY++) {
             $$gridIntSliceRef[$x][$cavY] = 'CAV';
         }
@@ -674,9 +727,9 @@ sub grid2GroFile {
             for (my $y=$gridYMinAbs; $y<=$gridYMaxAbs; $y++) {
                 next unless $$gridRef[$z][$x][$y];
                 my $resName = $$gridRef[$z][$x][$y] ? $$gridRef[$z][$x][$y] : 'MOX';
-                my %tmpCoords = ('cooX' => $x * $gridDeltaX - $coordShift,
-                                 'cooY' => $y * $gridDeltaY - $coordShift,
-                                 'cooZ' => $z * $gridDeltaZ - $coordShift);
+                my %tmpCoords = ('cooX' => $x * $gridDeltaX,
+                                 'cooY' => $y * $gridDeltaY,
+                                 'cooZ' => $z * $gridDeltaZ);
                 push(@{$gridGroData{'atoms'}}, setVoxel(++$voxId, $resName, $$gridRef[$z][$x][$y], $voxId, \%tmpCoords));
             }
         }
