@@ -39,7 +39,7 @@ my $gridYMax   = 0;
 my $gridDeltaX = 0.5;
 my $gridDeltaY = 0.5;
 
-my $coordShift = 2; # Shift all coordinates to avoid negative grid points (PBC).
+my $coordShift = 0; # Shift all coordinates to avoid negative grid points (PBC).
 
 
 
