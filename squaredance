@@ -180,18 +180,18 @@ if ($range2Slice) {
 ### Normal workflow: analyze slice by slice ####################################
 Grid3D::setGridDelta($gridDeltaX, $gridDeltaY, $gridDeltaZ); # Set the grid spacing in x, y & z.
 Grid3D::atoms2Grid(\@atomIds, $groData{'atoms'});
-Grid3D::detectCavity($cavProbeRad);
-Grid3D::getVdwSurf();
+#Grid3D::detectCavity($cavProbeRad);# COMMENTED 2014-03-12
+#Grid3D::getVdwSurf();# COMMENTED 2014-03-12
 Grid3D::grid2GroFile(Grid3D::getGridOccRef(), $gridOutFile) if $gridOutFile; # Print grid-coordinates.
 Grid3D::grid2GroFile(Grid3D::getGridIntRef(), 'grid.int.gro') if $gridOutFile; # Print grid-coordinates.
-Grid3D::grid2GroFile(Grid3D::getProbeRef(),   'grid.probe.gro') if $gridOutFile; # Print grid-coordinates.
-Grid3D::grid2GroFile(Grid3D::getGridVdwSurfRef(), 'grid.vdws.gro') if $gridOutFile; # Print grid-coordinates.
+#Grid3D::grid2GroFile(Grid3D::getProbeRef(),   'grid.probe.gro') if $gridOutFile; # Print grid-coordinates. # COMMENTED 2014-03-12
+#Grid3D::grid2GroFile(Grid3D::getGridVdwSurfRef(), 'grid.vdws.gro') if $gridOutFile; # Print grid-coordinates. # COMMENTED 2014-03-12
 
 
 my $zProfileRef = getZProfile(Grid3D::getGridOccRef());
 my $xSecAreaOutFile = "xsecarea.dat";
 xSecArea2File($zProfileRef, $xSecAreaOutFile, $gridDeltaX, $gridDeltaY, $gridDeltaZ);
-
+exit;
 $zProfileRef = getZProfile(Grid3D::getGridIntRef());
 $xSecAreaOutFile = "xsecarea.int.dat";
 xSecArea2File($zProfileRef, $xSecAreaOutFile, $gridDeltaX, $gridDeltaY, $gridDeltaZ);
