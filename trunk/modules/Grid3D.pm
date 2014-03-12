@@ -44,7 +44,7 @@ my $gridDeltaX = 0.5;
 my $gridDeltaY = 0.5;
 my $gridDeltaZ = 0.5;
 
-my $coordShift = 1; # Shift all coordinates to avoid negative grid points (PBC).
+my $coordShift = 2; # Shift all coordinates to avoid negative grid points (PBC). FIND A BETTER SOLUTION FOR THIS!
 
 
 
@@ -67,7 +67,7 @@ sub getGridVdwSurfRef { return \@vdwSurf; }
 sub getMin {
     my $min = $_[$gridZMin];
     for (my $z=$gridZMin; $z<=$gridZMax; $z++) {
-        next unless $_[$z];
+        next unless defined $_[$z];
         $min = $_[$z] if $_[$z] < $min;
     }
     return $min;
@@ -78,7 +78,7 @@ sub getMin {
 sub getMax {
     my $max = $_[$gridZMax];
     for (my $z=$gridZMin; $z<=$gridZMax; $z++) {
-        next unless $_[$z];
+        next unless defined $_[$z];
         $max = $_[$z] if $_[$z] > $max;
     }
     return $max;
@@ -100,7 +100,7 @@ sub atoms2Grid {
 
         my $element = substr($$coordDataRef[$_]{'atomName'}, 0, 1);
 #        my $element = $$coordDataRef[$_]{'atomName'};
-        my $radius  = PTE::getRadius($element);
+        my $radius  = PTE::getRadius($element)*1.4;
         my $radius2 = $radius * $radius;
 
 
@@ -119,8 +119,8 @@ sub atoms2Grid {
                 for (my $y=($tmpGridY-$subrangeY); $y<=($tmpGridY+$subrangeY); $y++) {
                     my $dx = $$coordDataRef[$_]{'cooX'} + $coordShift - $x * $gridDeltaX;
                     my $dy = $$coordDataRef[$_]{'cooY'} + $coordShift - $y * $gridDeltaY;
-                    my $dz = $$coordDataRef[$_]{'cooZ'} + $coordShift - $z * $gridDeltaZ;
                     next if ($dx*$dx + $dy*$dy) > $radius2;
+                    my $dz = $$coordDataRef[$_]{'cooZ'} + $coordShift - $z * $gridDeltaZ;
                     next if ($dx*$dx + $dz*$dz) > $radius2;
                     next if ($dy*$dy + $dz*$dz) > $radius2;
 
